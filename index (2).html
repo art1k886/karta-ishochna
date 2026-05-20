@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тактический Штаб Pro</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #panel {
+            background-color: #262626;
+            padding: 12px 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            border-bottom: 2px solid #3d3d3d;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            z-index: 1000;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            background-color: #383838;
+            color: white;
+            border: 1px solid #555;
+            padding: 8px 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-weight: bold;
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover { background-color: #4a4a4a; }
+        .btn:disabled { background-color: #222; color: #555; border-color: #333; cursor: not-allowed; }
+        
+        .btn.active-red { background-color: #b32424; border-color: #ff4d4d; }
+        .btn.active-blue { background-color: #1976d2; border-color: #42a5f5; }
+        .btn.active-arrow { background-color: #e65100; border-color: #ff9800; }
+
+        input[type="file"] { display: none; }
+        .file-upload { background-color: #1f5725; border-color: #2e7d32; }
+        .file-upload:hover { background-color: #2e7d32; }
+
+        .scale-box {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #333;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            font-size: 14px;
+        }
+        .scale-box input {
+            width: 60px;
+            background: #1a1a1a;
+            border: 1px solid #555;
+            color: #fff;
+            padding: 4px;
+            border-radius: 4px;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .divider {
+            width: 2px;
+            height: 25px;
+            background-color: #444;
+            margin: 0 5px;
+        }
+
+        #map {
+            flex-grow: 1;
+            width: 100%;
+            background-color: #111;
+        }
+
+        .tactical-arrow {
+            font-size: 34px;
+            text-align: center;
+            line-height: 34px;
+            color: #ff3333;
+            text-shadow: 0 0 6px black, 0 0 3px black;
+            cursor: grab;
+            display: inline-block;
+            width: 34px;
+            height: 34px;
+        }
+        .tactical-arrow:active { cursor: grabbing; }
+
+        .measure-tooltip {
+            background: #1976d2;
+            color: white;
+            border: 1px solid #42a5f5;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-weight: bold;
+            font-size: 13px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+
+        #hint {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 12px 16px;
+            border-radius: 6px;
+            border: 1px solid #444;
+            z-index: 1000;
+            font-size: 13px;
+            pointer-events: none;
+            line-height: 1.4;
+        }
+        #hint b { color: #ff4d4d; }
+        #hint .blue { color: #42a5f5; }
+        #hint .orange { color: #ff9800; }
+    </style>
+</head>
+<body>
+
+    <div id="panel">
+        <label class="btn file-upload">
+            📁 Карта
+            <input type="file" id="imageLoader" accept="image/*">
+        </label>
+
+        <div class="divider"></div>
+
+        <button class="btn active-red" id="btn-zone-red" onclick="setMode('zone-red')">🔴 Зона Нападения</button>
+        <button class="btn" id="btn-zone-blue" onclick="setMode('zone-blue')">🔵 Освобожденная Зона</button>
+        <button class="btn" id="btn-arrow" onclick="setMode('arrow')">🏹 Авто-Стрелка</button>
+        <button class="btn" id="btn-measure" onclick="setMode('measure')">📏 Линейка</button>
+        
+        <button class="btn" style="background-color: #444;" id="btn-close-zone" onclick="finishPolygon()" disabled>Замкнуть (Enter)</button>
+
+        <div class="divider"></div>
+
+        <div class="scale-box">
+            <span>В 100 рх:</span>
+            <input type="number" id="scaleInput" value="100" min="1">
+            <span>метров</span>
+        </div>
+
+        <div class="divider"></div>
+
+        <button class="btn" id="btn-undo" onclick="undo()" title="Отменить (Ctrl + Z)" disabled>↩️</button>
+        <button class="btn" id="btn-redo" onclick="redo()" title="Повторить (Ctrl + Y)" disabled>↪️</button>
+        
+        <button class="btn" style="background-color: #555; margin-left: auto;" onclick="clearMap()">🗑️ Сброс</button>
+    </div>
+
+    <div id="map"></div>
+
+    <div id="hint">
+        <b>Управление:</b><br>
+        • Зоны: Кликай углы контура. Выход за края фото автоматически обрежется при <b>Enter</b>.<br>
+        • <span class="orange">Авто-Стрелка:</span> Включи режим и <b>кликни по красной зоне</b>. Стрелки встанут точно на передовых концах, игнорируя границы за картой.<br>
+        • <span class="blue">Линейка:</span> Два клика для замера расстояния.<br>
+        • История: <b>Ctrl + Z</b> — Отмена | <b>Ctrl + Y</b> — Вернуть.
+    </div>
+
+    <script>
+        var map = L.map('map', {
+            crs: L.CRS.Simple,
+            minZoom: -3,
+            maxZoom: 3,
+            attributionControl: false
+        });
+
+        var currentLayer = null; 
+        var currentMode = 'zone-red'; 
+        var mapBounds = null; // Границы загруженного фото
+
+        var tempPoints = [];
+        var tempLines = null;
+        var tempMarkers = [];
+
+        var measureStartLatLng = null;
+        var measureTempMarker = null;
+
+        var selectedArrowElement = null;
+        var selectedArrowData = null;
+
+        var historyStack = [];
+        var redoStack = [];
+
+        map.setView([500, 500], 0);
+
+        function setMode(mode) {
+            if ((currentMode === 'zone-red' || currentMode === 'zone-blue') && tempPoints.length > 0) resetTempZone();
+            if (currentMode === 'measure' && measureStartLatLng) resetTempMeasure();
+
+            currentMode = mode;
+            
+            ['btn-zone-red', 'btn-zone-blue', 'btn-arrow', 'btn-measure'].forEach(id => {
+                document.getElementById(id).classList.remove('active-red', 'active-blue', 'active-arrow');
+            });
+            
+            var activeBtn = document.getElementById('btn-' + mode);
+            if (mode === 'zone-red') activeBtn.classList.add('active-red');
+            if (mode === 'zone-blue') activeBtn.classList.add('active-blue');
+            if (mode === 'arrow') activeBtn.classList.add('active-arrow');
+            if (mode === 'measure') activeBtn.classList.add('active-blue');
+        }
+
+        // Загрузка изображения карты
+        document.getElementById('imageLoader').addEventListener('change', function(e) {
+            var reader = new FileReader();
+            reader.onload = function(event) {
+                var img = new Image();
+                img.onload = function() {
+                    if (currentLayer) map.removeLayer(currentLayer);
+                    clearMap();
+                    mapBounds = [[0, 0], [img.height, img.width]];
+                    currentLayer = L.imageOverlay(event.target.result, mapBounds).addTo(map);
+                    map.fitBounds(mapBounds);
+                }
+                img.src = event.target.result;
+            }
+            reader.readAsDataURL(e.target.files[0]);
+        });
+
+        map.on('click', function(e) {
+            if (!currentLayer) {
+                alert('Сначала загрузите карту!');
+                return;
+            }
+
+            if (currentMode === 'zone-red' || currentMode === 'zone-blue') {
+                addPointToZone(e.latlng);
+            } else if (currentMode === 'measure') {
+                handleMeasureClick(e.latlng);
+            }
+        });
+
+        // --- УЛУЧШЕННОЕ АВТОРАССТАВЛЕНИЕ СТРЕЛОК ---
+        function generateArrowsForZone(polygon, count) {
+            var latlngs = polygon.getLatLngs()[0];
+            if (latlngs.length < 3 || !mapBounds) return;
+
+            var maxLat = mapBounds[1][0];
+            var maxLng = mapBounds[1][1];
+
+            // 1. Вычисляем центр
+            var centerLat = 0, centerLng = 0;
+            latlngs.forEach(p => { centerLat += p.lat; centerLng += p.lng; });
+            centerLat /= latlngs.length;
+            centerLng /= latlngs.length;
+
+            // 2. Считаем удаления и сортируем по передовым позициям фронта
+            var pointsWithDist = latlngs.map(p => {
+                var dist = Math.pow(p.lat - centerLat, 2) + Math.pow(p.lng - centerLng, 2);
+                return { latlng: p, dist: dist };
+            });
+            pointsWithDist.sort((a, b) => b.dist - a.dist);
+
+            var spawnedArrows = [];
+            var maxAvailablePoints = Math.min(pointsWithDist.length, count * 2);
+            var frontPointsPool = pointsWithDist.slice(0, maxAvailablePoints);
+
+            // 3. Спавним стрелки строго на концах линий
+            for (var i = 0; i < count; i++) {
+                var targetPointData = frontPointsPool[i % frontPointsPool.length];
+                var basePt = targetPointData.latlng;
+
+                // Проверка: Если точка лежит прямо на обрезанном краю фотографии, пропускаем её спавн
+                if (basePt.lat <= 1 || basePt.lat >= maxLat - 1 || basePt.lng <= 1 || basePt.lng >= maxLng - 1) {
+                    continue; 
+                }
+
+                // Добавляем микро-рандом (всего 6 пикселей для живого эффекта, без сильного отхода)
+                var randomOffsetLat = (Math.random() - 0.5) * 12;
+                var randomOffsetLng = (Math.random() - 0.5) * 12;
+
+                var arrowLat = basePt.lat + randomOffsetLat;
+                var arrowLng = basePt.lng + randomOffsetLng;
+                var arrowLatLng = L.latLng(arrowLat, arrowLng);
+
+                var angleRadians = Math.atan2(arrowLat - centerLat, arrowLng - centerLng);
+                var finalAngleDegrees = -(angleRadians * (180 / Math.PI));
+
+                var arrowId = 'arrow-' + Date.now() + '-' + i;
+                var arrowData = { id: arrowId, angle: finalAngleDegrees };
+
+                var arrowIcon = L.divIcon({
+                    html: `<div id="${arrowId}" class="tactical-arrow" style="transform: rotate(${finalAngleDegrees}deg);">➔</div>`,
+                    className: 'custom-arrow-container',
+                    iconSize: [34, 34],
+                    iconAnchor: [17, 17]
+                });
+
+                var marker = L.marker(arrowLatLng, { icon: arrowIcon, draggable: true }).addTo(map);
+                spawnedArrows.push(marker);
+
+                bindArrowEvents(marker, arrowId, arrowData);
+            }
+
+            if (spawnedArrows.length > 0) {
+                var arrowGroup = L.layerGroup(spawnedArrows);
+                pushAction({ type: 'add', layer: arrowGroup });
+            }
+        }
+
+        function bindArrowEvents(marker, arrowId, arrowData) {
+            marker.on('click', function(event) {
+                L.DomEvent.stopPropagation(event);
+                if (selectedArrowElement) selectedArrowElement.style.color = '#ff3333';
+                
+                selectedArrowElement = document.getElementById(arrowId);
+                selectedArrowData = arrowData;
+                if (selectedArrowElement) selectedArrowElement.style.color = '#ffff00';
+            });
+
+            marker.on('dragstart', function() {
+                if (selectedArrowElement) selectedArrowElement.style.color = '#ff3333';
+                selectedArrowElement = null;
+                selectedArrowData = null;
+            });
+        }
+
+        // --- ИЗМЕРЕНИЕ РАССТОЯНИЯ ---
+        function handleMeasureClick(latlng) {
+            if (!measureStartLatLng) {
+                measureStartLatLng = latlng;
+                measureTempMarker = L.circleMarker(latlng, { radius: 6, color: '#1976d2', fillColor: '#fff', fillOpacity: 1 }).addTo(map);
+            } else {
+                var p1 = measureStartLatLng;
+                var p2 = latlng;
+                
+                var dx = p2.lng - p1.lng;
+                var dy = p2.lat - p1.lat;
+                var pixelDistance = Math.sqrt(dx * dx + dy * dy);
+
+                var scaleMultiplier = parseFloat(document.getElementById('scaleInput').value) / 100;
+                var distanceInMeters = pixelDistance * scaleMultiplier;
+
+                var textDisplay = distanceInMeters >= 1000 ? (distanceInMeters / 1000).toFixed(2) + " км" : Math.round(distanceInMeters) + " м";
+
+                var line = L.polyline([p1, p2], { color: '#1976d2', weight: 4 }).addTo(map);
+                var endMarker = L.circleMarker(p2, { radius: 6, color: '#1976d2', fillColor: '#fff', fillOpacity: 1 }).addTo(map);
+
+                var midPoint = [ (p1.lat + p2.lat) / 2, (p1.lng + p2.lng) / 2 ];
+                var tooltip = L.tooltip({ permanent: true, direction: 'center', className: 'measure-tooltip' }).setContent(textDisplay).setLatLng(midPoint).addTo(map);
+
+                var measureGroup = L.layerGroup([measureTempMarker, line, endMarker, tooltip]).addTo(map);
+                pushAction({ type: 'add', layer: measureGroup });
+
+                measureStartLatLng = null;
+                measureTempMarker = null;
+            }
+        }
+
+        function resetTempMeasure() {
+            if (measureTempMarker) map.removeLayer(measureTempMarker);
+            measureStartLatLng = null;
+            measureTempMarker = null;
+        }
+
+        // --- РИСОВАНИЕ И АВТО-ОБРЕЗАНИЕ ЗОН ---
+        function addPointToZone(latlng) {
+            tempPoints.push(latlng);
+            
+            var color = currentMode === 'zone-red' ? '#ff4d4d' : '#42a5f5';
+            var marker = L.circleMarker(latlng, { radius: 5, color: color, fillColor: '#fff', fillOpacity: 1 }).addTo(map);
+            tempMarkers.push(marker);
+
+            if (tempPoints.length > 1) {
+                if (tempLines) map.removeLayer(tempLines);
+                tempLines = L.polyline(tempPoints, { color: color, weight: 3, dashArray: '5, 10' }).addTo(map);
+            }
+
+            if (tempPoints.length >= 3) {
+                document.getElementById('btn-close-zone').disabled = false;
+                document.getElementById('btn-close-zone').style.backgroundColor = currentMode === 'zone-red' ? '#b32424' : '#1976d2';
+            }
+        }
+
+        function finishPolygon() {
+            if (tempPoints.length < 3 || !mapBounds) return;
+
+            var maxLat = mapBounds[1][0];
+            var maxLng = mapBounds[1][1];
+
+            // АВТО-ОБРЕЗАНИЕ: Подгоняем точки под габариты изображения, если кликнули за экраном
+            var croppedPoints = tempPoints.map(p => {
+                var cLat = Math.max(0, Math.min(p.lat, maxLat));
+                var cLng = Math.max(0, Math.min(p.lng, maxLng));
+                return L.latLng(cLat, cLng);
+            });
+
+            var isRed = currentMode === 'zone-red';
+            var polygon = L.polygon(croppedPoints, {
+                color: isRed ? '#ff3333' : '#1976d2',
+                fillColor: isRed ? '#ff3333' : '#1976d2',
+                fillOpacity: 0.4,
+                weight: 2
+            }).addTo(map);
+
+            polygon.bindPopup(isRed ? "Зона под контролем противника" : "Освобожденная территория");
+
+            polygon.on('click', function(e) {
+                if (currentMode === 'arrow' && isRed) {
+                    L.DomEvent.stopPropagation(e);
+                    var inputCount = prompt("Сколько стрелок выпустить на концах этой зоны?", "3");
+                    var count = parseInt(inputCount);
+                    if (!isNaN(count) && count > 0) {
+                        generateArrowsForZone(polygon, count);
+                    }
+                }
+            });
+
+            pushAction({ type: 'add', layer: polygon });
+            resetTempZone();
+        }
+
+        function resetTempZone() {
+            tempPoints = [];
+            if (tempLines) map.removeLayer(tempLines);
+            tempLines = null;
+            tempMarkers.forEach(m => map.removeLayer(m));
+            tempMarkers = [];
+            document.getElementById('btn-close-zone').disabled = true;
+            document.getElementById('btn-close-zone').style.backgroundColor = '#444';
+        }
+
+        // --- СИСТЕМА ИСТОРИИ ---
+        function pushAction(action) {
+            historyStack.push(action);
+            redoStack = []; 
+            updateHistoryButtons();
+        }
+
+        function undo() {
+            if (historyStack.length === 0) return;
+            if (selectedArrowElement) { selectedArrowElement.style.color = '#ff3333'; selectedArrowElement = null; selectedArrowData = null; }
+
+            var action = historyStack.pop();
+            redoStack.push(action);
+
+            if (action.type === 'add') map.removeLayer(action.layer);
+            updateHistoryButtons();
+        }
+
+        function redo() {
+            if (redoStack.length === 0) return;
+            var action = redoStack.pop();
+            historyStack.push(action);
+
+            if (action.type === 'add') map.addLayer(action.layer);
+            updateHistoryButtons();
+        }
+
+        function updateHistoryButtons() {
+            document.getElementById('btn-undo').disabled = (historyStack.length === 0);
+            document.getElementById('btn-redo').disabled = (redoStack.length === 0);
+        }
+
+        window.addEventListener('keydown', function(e) {
+            var key = e.key.toLowerCase();
+
+            if (e.ctrlKey) {
+                if (key === 'z' || key === 'я') { e.preventDefault(); undo(); }
+                if (key === 'y' || key === 'н') { e.preventDefault(); redo(); }
+            }
+
+            if (selectedArrowData && selectedArrowElement) {
+                if (key === 'a' || key === 'ф') selectedArrowData.angle -= 5;
+                if (key === 'd' || key === 'в') selectedArrowData.angle += 5;
+                selectedArrowElement.style.transform = `rotate(${selectedArrowData.angle}deg)`;
+            }
+
+            if (e.key === 'Enter' && (currentMode === 'zone-red' || currentMode === 'zone-blue') && tempPoints.length >= 3) {
+                finishPolygon();
+            }
+        });
+
+        map.on('mousedown', function() {
+            if (selectedArrowElement) {
+                selectedArrowElement.style.color = '#ff3333';
+                selectedArrowElement = null;
+                selectedArrowData = null;
+            }
+        });
+
+        function clearMap() {
+            resetTempZone();
+            resetTempMeasure();
+            map.eachLayer(function(layer) {
+                if (layer !== currentLayer && layer._url === undefined) map.removeLayer(layer);
+            });
+            selectedArrowElement = null;
+            selectedArrowData = null;
+            historyStack = [];
+            redoStack = [];
+            updateHistoryButtons();
+        }
+    </script>
+</body>
+</html>
